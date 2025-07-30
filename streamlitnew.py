@@ -180,8 +180,10 @@ def plot_slice(volume, detections, slice_idx):
 # ================================
 # 🧠 Streamlit UI
 # ================================
-st.title("🧠 CMB Detection on MRI (Lokal)")
-uploaded_file = st.file_uploader("Upload NIfTI file (.nii.gz)", type=["nii.gz"])
+st.set_page_config(page_title="CMB Detection", layout="wide")
+st.title("🧠 CMB Detection on MRI")
+
+uploaded_file = st.file_uploader("📤 Upload NIfTI file (.nii.gz)", type=["nii.gz"])
 
 if uploaded_file:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".nii.gz") as tmp:
@@ -189,98 +191,87 @@ if uploaded_file:
         tmp_path = tmp.name
 
     try:
-        nii = nib.load(tmp_path)
-        volume = nii.get_fdata().astype(np.float32)
-        volume = (volume - np.min(volume)) / (np.max(volume) - np.min(volume))
-        st.success(f"✅ Data loaded: {volume.shape}")
+        with st.spinner("📂 Loading and normalizing NIfTI file..."):
+            nii = nib.load(tmp_path)
+            volume = nii.get_fdata().astype(np.float32)
+            volume = (volume - np.min(volume)) / (np.max(volume) - np.min(volume))
+            st.success(f"✅ Data loaded: {volume.shape}")
     finally:
         os.remove(tmp_path)
 
-    # Deteksi pipeline
-    fcn_model = load_model_local(FCN_MODEL_PATH)
-    cnn_model = load_model_local(CNN_MODEL_PATH, custom=True)
+    # Run full inference pipeline with spinner
+    with st.spinner("💡 Running model inference, please wait..."):
+        fcn_model = load_model_local(FCN_MODEL_PATH)
+        cnn_model = load_model_local(CNN_MODEL_PATH, custom=True)
 
-    brain_mask = create_brain_mask(volume)
-    fcn_map = fcn_inference(fcn_model, volume * brain_mask)
-    candidates = fcn_clustering(fcn_map)
-    X, valid = extract_cnn_patches(volume, candidates)
-    detections = cnn_inference(cnn_model, X, valid)
+        brain_mask = create_brain_mask(volume)
+        fcn_map = fcn_inference(fcn_model, volume * brain_mask)
+        candidates = fcn_clustering(fcn_map)
+        X, valid = extract_cnn_patches(volume, candidates)
+        detections = cnn_inference(cnn_model, X, valid)
+    st.success("🎉 Inference finished!")
 
-    # Display hasil deteksi
-    st.metric("Jumlah Deteksi", len(detections))
-    
-    # Inisialisasi session state untuk slice index
+    st.metric("🧠 Jumlah Deteksi", len(detections))
+
+    # Initialize session state for slice index
     if 'current_slice' not in st.session_state:
         st.session_state.current_slice = volume.shape[2] // 2
-    
-    # Navigation buttons untuk hasil deteksi
+
+    # Navigation if detections exist
     if detections:
         st.subheader("🎯 Navigate to Detection Results")
         detection_slices = get_detection_slices(detections)
-        
-        # Tombol untuk lompat ke deteksi
+
         col1, col2, col3, col4 = st.columns(4)
-        
         with col1:
-            if st.button("🏠 Go to First Detection"):
+            if st.button("🏠 First Detection"):
                 st.session_state.current_slice = detection_slices[0]
-        
         with col2:
             if st.button("⬅️ Previous Detection"):
                 current = st.session_state.current_slice
-                # Cari slice deteksi sebelumnya
                 prev_slices = [s for s in detection_slices if s < current]
                 if prev_slices:
                     st.session_state.current_slice = max(prev_slices)
                 else:
                     st.warning("Sudah di deteksi pertama")
-        
         with col3:
             if st.button("➡️ Next Detection"):
                 current = st.session_state.current_slice
-                # Cari slice deteksi berikutnya
                 next_slices = [s for s in detection_slices if s > current]
                 if next_slices:
                     st.session_state.current_slice = min(next_slices)
                 else:
                     st.warning("Sudah di deteksi terakhir")
-        
         with col4:
-            if st.button("🎯 Go to Last Detection"):
+            if st.button("🎯 Last Detection"):
                 st.session_state.current_slice = detection_slices[-1]
-        
-        # Dropdown untuk memilih deteksi spesifik
+
+        # Selectbox untuk jump ke deteksi tertentu
         st.subheader("📋 Jump to Specific Detection")
         detection_options = []
         for i, d in enumerate(detections):
             cx, cy, cz = d["coordinate"]
             score = d.get("cnn_score", d.get("score", 0))
             detection_options.append(f"Detection {i+1}: Slice {cz} (x:{cx}, y:{cy}) - Score: {score:.3f}")
-        
+
         selected_detection = st.selectbox("Select detection:", detection_options)
-        if selected_detection:
-            # Extract slice number dari selection
+        if selected_detection and st.button("🚀 Jump to Selected"):
             slice_num = int(selected_detection.split("Slice ")[1].split(" ")[0])
-            if st.button("🚀 Jump to Selected"):
-                st.session_state.current_slice = slice_num
-        
-        # Informasi slice dengan deteksi
+            st.session_state.current_slice = slice_num
+
         st.info(f"📊 Slices with detections: {', '.join(map(str, detection_slices))}")
-    
-    # Slider untuk navigasi manual
-    st.subheader("🔍 Manual Navigation")
-    idx = st.slider("Slice Index", 0, volume.shape[2] - 1, 
-                    value=st.session_state.current_slice, 
-                    key="slice_slider")
-    
-    # Update session state ketika slider berubah
+
+    # Manual navigation
+    st.subheader("🔍 Manual Slice Navigation")
+    idx = st.slider("Slice Index", 0, volume.shape[2] - 1,
+                    value=st.session_state.current_slice, key="slice_slider")
     st.session_state.current_slice = idx
-    
-    # Plot slice
+
+    # Show slice
     fig = plot_slice(volume, detections, idx)
     st.pyplot(fig)
-    
-    # Informasi deteksi di slice saat ini
+
+    # Detection info
     current_detections = [d for d in detections if d["coordinate"][2] == idx]
     if current_detections:
         st.success(f"🎯 {len(current_detections)} CMB detected in this slice!")
@@ -289,4 +280,4 @@ if uploaded_file:
             score = d.get("cnn_score", d.get("score", 0))
             st.write(f"Detection {detections.index(d)+1}: ({cx}, {cy}, {cz}) - Score: {score:.3f}")
     else:
-        st.info("No detections in this slice")
+        st.info("ℹ️ No detections in this slice.")
