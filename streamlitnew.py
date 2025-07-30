@@ -53,8 +53,8 @@ def load_model_local(path, custom=False):
 # ================================
 # 📍 Path ke Model Lokal
 # ================================
-FCN_MODEL_PATH = "D:/New Streamlit/fcn_precision_focused_best.h5"
-CNN_MODEL_PATH = "D:/New Streamlit/stage2_cnn_final.h5"
+FCN_MODEL_PATH = "fcn_precision_focused_best.h5"
+CNN_MODEL_PATH = "stage2_cnn_final.h5"
 
 # ================================
 # ⚙️ Konfigurasi
